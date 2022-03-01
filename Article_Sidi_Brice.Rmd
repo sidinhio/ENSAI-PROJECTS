@@ -1,0 +1,230 @@
+---
+title: "Time series article resume"
+author: "Sidi TRAORE, Brice Tifa"
+date: "16/12/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r library , echo=FALSE, message = FALSE, warning = FALSE, tidy=TRUE}
+
+library(forecast)
+library(caschrono)
+library(dygraphs)
+library(dplyr)
+library(tseries)
+library(vars)
+library(fGarch)
+library(lattice)
+library(quantmod)
+library(latex2exp)
+library(Metrics)
+```
+
+
+# Exercice 4 : Implémentation des modèles VAR, SVAR et SVEC.
+
+## Introduction 
+
+Depuis les années 1980 suite aux critiques de Sims, l'analyse des données multivarirées dans le contexe des VAR a beaucoup évolué et est devenu un instrument standard en économétrie. En effet, des tests statistisques sont utilisées pour déterminer l'inter-dépendance et la relations dynamiques dans les variables. Cette méthodologie a été enrichie avec l'incorporation des informations à priori non statisques.  
+
+Les modèles VAR expliquent les variables endogènes uniquement par leur propre histoire, en dehors des régresseurs déterministes. En revanche, les modèles vectoriels autorégressifs structurels (dorénavant : SVAR) permettent l'explicitation la modélisation de l'interdépendance contemporaine entre les variables de gauche. D'où, ces types de modèles tentent de contourner les défauts des modèles VAR.  
+ 
+Engle et Granger (1987) ont doté les économétriciens avec un outil puissant pour modéliser et tester les relations économiques, à savoir le concept de co-intégration. Aujourd'hui, ces branches de la recherche sont unifiées sous la forme des modèles de correction vectorielle des erreurs (désormais : MCEV) et de correction vectorielle structurelle des erreurs (désormais : SVEC).  
+
+Dans la suite, nous présenterons les principaux concepts et la mise en oeuvre des modèles VAR, SVAR, VECM et SVECM.
+
+### 1 Modèles VAR 
+#### 1.1 Présentation théoriques
+
+Un processus Vecteur auto regressif d'ordre p, VAR(p) est définit comme suit : 
+$$y_t = A_1y_{t-1} + ... + A_p y_{t-p} + u_t$$
+Avec $A_i$ pour ${i = 1, ..., p}$  des coefficients d'une matrice de dimension $(K * K)$. Et  Les résidus $u_t$ sont bruits blancs. C'est à dire : 
+
+$E(u_t) = 0$  
+ $E(u_tu_t^T) = \Sigma_u$ la matrice de variance-covariance est indépendante du temps et définie positive.  
+
+On peut réecrire l'équation précedante comme suit :  
+
+$$y_t - A_1y_{t-1} - ... - A_p y_{t-p} = u_t  \\
+(I_K - A_1z - ... A_pz^p)y_t =  u_t  \\
+\phi(z)y_t = u_t \space 
+$$
+
+Une caractéristique importante du processus VAR(p) est sa stabilité. Pour vérifier la stabilité, On peut réécrire le processus VAR(p) sous forme d'un processus VAR(1)
+
+$$\xi_t = A \xi_{t-1} + v_t$$  
+Avec :
+
+$$\xi_t = 
+\left(\begin{array}{c} 
+y_t\\
+.\\
+.\\
+.\\
+y_{t-p+1}
+\end{array}\right),
+A =
+\left(\begin{array}{ccccccc}
+ A_1 & A_2  &.  &.  &.  & A_{p-1} &A_p  \\ 
+ I &0  &.  &.  &.  &0  &0  \\
+ 0& I  & .  &.  & . &0  &0  \\
+ .& . &.  &  &  & . &.  \\
+ .& . &  &.  &  & . &.  \\
+ .& . &  &  &.  & . &.  \\
+ 0& 0  &.  &.  &.  & I  &0 
+\end{array}\right),
+v_t =
+\left(\begin{array}{c}
+u_t\\
+0\\
+.\\
+.\\
+.\\
+0
+\end{array}\right)
+$$
+
+Avec $\xi_t$ et $v_t$ des vecteurs de dimension $(KP * 1)$ et $A$ une matrice de 
+dimension $(KP * KP)$. Le processus $VAR(P)$ est stable si le module des valeurs propres 
+est inférieur à 1.
+
+#### 1.2 Implémentation 
+
+Pour la mise en en application du modèle, les auteurs analysent les données du marché de travail Canadien entre le premier trimestre 1980 et le quatrième trimestre 2004 à travers quatre indicateurs économiques.  Ils ont utilisé les séries suivantes : la productivité du travail "prod", le taux d'emploi "e", le taux de chômage "u" et l'indice de salaire réel "rw".  
+
+$$y_t =
+\left(\begin{array}{c} 
+prod_t\\
+e_t\\
+u_t\\
+rw_t
+\end{array}\right)
+$$
+
+```{r , echo=FALSE }
+library("vars")
+data("Canada")
+#summary(Canada)
+
+plot(Canada, nc = 2, xlab = "")
+```
+
+Ce graphique permet de remarquer une tendance croissante pour le taux d'emploi (e), la productivité (prod) et l'indice du salaire (rw). Tandis que le taux de chômage (u) ne présente pas de tendance. 
+
+**Stationnarité : **  
+La première étape pour les auteurs a consisté a effectué des test augmenté de Dickey-Fuller pour vérifier la stationnarité du processus VAR. Les résultats de ces tests montrent que le processus est intégré d'ordre 1.
+
+
+
+```{r , echo=FALSE, include= FALSE }
+adf1 <- summary(ur.df(Canada[, "prod"], type = "trend", lags = 2))
+adf1
+adf2 <- summary(ur.df(diff(Canada[, "prod"]), type = "drift", lags = 1))
+adf2
+
+```
+
+
+
+```{r , echo=FALSE }
+
+```
+
+**Sélection du modèle : ** 
+Pour sélectionner le nombre de retard, les auteurs cherchent à déterminer à travers une procédure automatique, le nombre de retards qui minimise les critères d'informations AIC, FPE, HQ et SC.
+
+```{r , echo=FALSE }
+selection <- VARselect(Canada, lag.max = 8, type = "both")
+selection$selection
+
+```
+
+
+
+Selon l'AIC et la FPE, le nombre optimal de retards est p = 3, le HQ
+indique p = 2 et le critère SC indique un nombre optimale de retard p = 1.  
+Ils ont donc estimé  
+pour les trois ordres de retards, un VAR comprenant une constante et une tendance comme régresseurs déterministes. Pour valider le modèle, ils ont considéré le taux d'empoi (e) et ont effectué des tests sur les résidus de ce processus.
+
+$$e_t = e_{t-1} + u_{t-1} + r w_{t-1} + \epsilon_t$$
+
+
+```{r , echo=FALSE, include= FALSE }
+Canada <- Canada[, c("prod", "e", "U", "rw")]
+p1ct <- VAR(Canada, p = 1, type = "both")
+p1ct
+```
+
+**Validation / Tests sur les résidus : **
+
+```{r , echo=FALSE }
+plot(p1ct, names = "e")
+
+```
+
+
+```{r , echo=FALSE, include= FALSE }
+
+ser11 <- serial.test(p1ct, lags.pt = 16, type = "PT.asymptotic")
+ser11$serial
+norm1 <- normality.test(p1ct)
+norm1$jb.mul
+
+
+```
+
+Parmis les modèles considérés, les résidus du modèle VAR(1) sont bruits blancs (p-value = 0.606 > 5%, test de Portemanteau) et suivent une loi normale (p-value =  0.2708 pour le test de Jacque Berra). Parcontre le test d'hétéroscédasticité d'Engle ne nous permet pas d'accepter l'hypothèse d'homoscédasticité des résidus pour le processus VAR(1) (p-value = 0.01606).  
+
+Compte tenu des résultats des tests de diagnostic, les auteurs ont conclu qu'une spécification VAR(1) pourrait être trop restrictive.  
+
+Dans la suite, les auteurs ont estimé un modèle VECM dans lequel une tendance déterministe a été incluse. Avant de présenter ce modèle VECM, nous allons présenter le modèle SVAR.
+
+### 2 Structural vector autoregressive models SVAR
+Le modèle SVAR est la forme généralisée du modèle VAR(P). Il se définit comme suit : 
+
+$$Ay_t = A_1^*y_{t-1} + ... + A_p^*y_{t-p} + B \epsilon_t$$
+On formule les hypotèses suivantes :  
+1 Les résidus structurels $\epsilon_t$ sont bruit blanc.
+2 Les coeffecients structurels sont différents de ceux du modèle VAR(p).  
+
+Un modèle SVAR peut être utilisé pour identifier les chocs et les retracer en utilisant l'IRA et/ou
+FEVD en imposant des restrictions sur les matrices A et/ou B.  
+Les paramètres du modèle sont estimés en minimisant la log-vraissemblance négative.
+
+$$lnL_c(A,B) = -  \frac{KT}{2}ln(2\pi) + \frac{T}{2}ln|A|^2 - \frac{T}{2}ln|B|^2 - \frac{T}{2}tr(A^T (B^{-1})^T B^{-1} A \Sigma_u) $$
+
+### 3. Vector error correction models (VECM)
+ Lorsque les séries ne sont pas stationnaires mais cointégrées, les modèles vectoriels à correction d’erreur (VECM) permettent de spécifier des relations stables à long terme tout en analysant dans le même temps la dynamique de court terme des variables considérées.
+ 
+Partant de l'équation du processus VAR, nous pouvons définir l'équation d'un processus VECM de manière suivante : 
+
+$$\Delta y_t = \alpha \beta^T y_{t-p} + \Gamma_1 \Delta y_{t-1} + ... + \Gamma_{p-1} y_{t-p+1} + u_t  $$ 
+Avec  :
+
+$$\Gamma_i = - (I - A_1 - ... - A_i), i = 1, ..., p-1$$
+Et 
+$$\Pi = \alpha \beta^T = - (I - A_1 - ... - A_i)$$  
+
+### 4.Structural vector error correction (SVECM)  
+
+En reconsidérerant l'équation précédante du processus VECM. Comme pour le modèle SVAR, on peut appliquer un raisonnement analogue
+aux modèles SVEC, en particulier lorsque la représentation VAR de niveau équivalent du
+Le VECM est utilisé. Toutefois, les informations contenues dans les propriétés de cointégration ne sont donc pas utilisées pour identifier les restrictions sur les chocs structurels. De ce fait, les variables ne sont pas utilisées pour identifier les restrictions aux chocs structurels.
+
+
+$$\Delta y_t = \alpha \beta^T y_{t-1}  + \Gamma_1 \Delta y_{t-1}v+ ... + \Gamma_{p-1} y_{t-p+1} + B \epsilon_t $$
+
+
+# Références 
+
+# Annexe 
+## 1. Test de blancheur 
+
+## 2. Test de Stationnarité
+
+## 1. Test de Normalité 
