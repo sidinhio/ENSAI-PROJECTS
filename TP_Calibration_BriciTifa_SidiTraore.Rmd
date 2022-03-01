@@ -1,0 +1,551 @@
+---
+title: "Calibration de Processus stochastiques"
+date: "`r Sys.Date()`"
+author: "Sidi TRAORE & Brice TIFA NETAGUE"
+output:
+  rmdformats::readthedown:
+    highlight: kate
+---
+
+
+```{r setup, include=FALSE}
+library(knitr)
+library(rmdformats)
+
+## Global options
+options(max.print="75")
+opts_chunk$set(echo=FALSE,
+	             cache=TRUE,
+               prompt=FALSE,
+               tidy=TRUE,
+               comment=NA,
+               message=FALSE,
+               warning=FALSE)
+opts_knit$set(width=75)
+```
+
+<style>
+body {
+text-align: justify}
+</style>
+
+
+
+```{r}
+#Install all requirements 
+library(dygraphs)
+library(dplyr)
+library(ggplot2)
+library(readr)
+library(Quandl)
+library(pmhtutorial)
+#install.packages("depmixS4")
+library(depmixS4)
+library(quantmod)
+library(Metrics)
+```
+
+**Modèle de Black-scholes : **
+$$dS_t = rS_td_t + \sigma dW_t$$
+
+Avec $r$ le taux sans risque, 
+
+$S_t$ le prix de l'actif à la date t, 
+
+et $\sigma$ la volatilité instantannée.
+
+
+Une limite du modèle de Black Scholes est qu'il suppose la volatilité $\sigma$ constate. Ce qui n'est pas vérifié sur les marchés financiers.
+Pour palier à cette limite, différents modèles on été construits pour estimer la volatitilité et les prix des actifs sur les marchés financiers. Il s'agit entre autres du modèle log sv de Taylor, du modèle d'Heston, des modèles markoviens à changement de régimes etc. Le but de ce tp, est de calibrer les volatilités du  NASDAQ  et d'en déduire les prix en utilisant ces différents modèles. 
+
+
+# 1.TP2 :  Estimation du modèle log SV de Taylor par filtrage particulaire
+
+Avant de commencer la modélisation il est intéressant de savoir à quoi correspond le NASDAQ. 
+
+**Le NASDAQ :**
+
+Le NASDAQ (National Association of Securities Dealers Automated Quotations) est un indice boursier calculé en tenant compte des entreprises technologiques inscrites sur le marché du NASDAQ. Cet indice est assez volatile car le marché d'actions NASDAQ contient plusieurs compagnies de haute technologie dont la valeur des actions est plus volatile que la valeur des actions des compagnies de l'économie traditionnelle.
+
+
+Dans cette première partie, nous appliquons un filtre particulaire pour estimer le processus de
+volatilité des rendements du NASDAQ entre 2012 et 2014 sur le marché financier.
+
+**Modèle SV de Taylor : ** 
+
+$$\left\{\begin{matrix}
+ r_t =&  exp(x_t/2)\xi_t \\ 
+ x_t = & \mu + \phi x_{t-1} + \sigma_n \eta_t 
+\end{matrix}\right.$$
+
+où $r_t$ est le rendement à la date t et $x_t$ le processus de log-volatilité. Les processus ($\xi_t$)
+et ($\eta_t$) sont mutuellement independant i.i.d. Gaussiens centrés et de variances unitaires et
+$\theta_0 = (\mu; \phi; \sigma^2_n)$ est le vecteur de paramètres.
+
+
+## 1.1 Chargement des données du NASDAQ de 2012 à 2014
+
+Nous chargeons les données du NASDAQ en utilisant l'API *Quandl* via une clé.
+```{r, echo=TRUE}
+Quandl.api_key("so1myBUQ3ZzWx8q3otLp")
+donnees <- Quandl("NASDAQOMX/OMXS30", start_date="2012-01-02", end_date="2014-01-02", type="zoo")
+
+data(donnees)
+
+#St2 <- read_csv("D:/ENSAI/3A/COURS/Calibration Processus stochastique/Cours/NASDAQ100_TP2.csv", 
+#               col_types = cols(DATE = col_date(format = "%Y-%m-%d"),  NASDAQ100 = col_number()))
+
+
+```
+
+
+## 1.2 Calcul des rendements 
+
+Nous calculons les rendements du NASDAQ comme suit : 
+$$y_t = 100 \times log \left (  \frac{S_t}{S_{t-1}} \right )$$
+
+Avec  $S_t$  la valeur de l’actif sous-jacent, c'est à dire la série NASDAQ.
+
+
+
+```{r, echo=FALSE}
+Yt <- 100 * diff(log(donnees$`Index Value`))
+```
+
+
+## 1.3 Estimer la volatilité xt à chaque instant t
+Nous estimons la volatilité en utilisant un filtre, la fonction *particleFilterSVmodel() sur R* . 
+
+```{r, echo=TRUE}
+#help(particleFilter)
+theat0 <- c(-0.1, 0.97, 0.15)
+Vol_particle <- particleFilterSVmodel(y = Yt, theta = theat0, noParticles = 100 ) 
+```
+
+
+## 1.4 comparaison des trajectoires
+
+A partir de la volatilité estimée $x_t$, nous estimons les trajectoires $Y_t$ des rendements ($Y_t =  exp(x_t/2)\xi_t$) comme sus-mentionné.
+
+```{r, echo=TRUE}
+x = seq(1, length(Yt))
+
+eps = rnorm(500,0,1)
+Xt_ajusted = eps*exp((Vol_particle$xHatFiltered)/2)
+
+par(mfrow=c(1,2))
+plot.ts(y = Yt, x = x, type = "l" ,main = "log Returns Observés", col = "blue")
+plot.ts(y = Xt_ajusted, x = x, type = "l" ,main = "log return estimated", col = "red")
+par(mfrow=c(1,1))
+
+```
+
+
+```{r, echo=TRUE}
+
+
+data_volatility <- data.frame (obs = 1:length(Yt), Yt = Yt, vol_estimated = Xt_ajusted)
+
+data_volatility %>% 
+  ggplot()+
+  geom_line(aes(obs, Yt, col = "Volatilité observée "))+
+  geom_line(aes(obs, vol_estimated, col = "Volatilité estimée"))+
+  theme_minimal()+
+  labs(x = "Temps",
+       y = "Volatility",
+       title = "Estimation de la volatilité filtre particulaire"
+  )
+
+
+```
+
+
+On remarque que les rendements estimés en utilisant le modèle de Taylor ont la même trajectoire que les rendements observés. Les deux courbes se superposent quasiment.
+
+Pour nous en convaincre nous allons calculer l'erreur absolue moyenne (MAE) et le pourcentage d'erreur absolue moyenne (MAPE). Ces deux statistiques nous indiquerons à quel point nos estimations de rendements s'approchent des valeurs réellement observées sur le marché.
+
+
+$$ MAE = \frac{1}{n} \sum_{i = 1} ^ n \left | y_i -  \hat{y_i}\right | $$
+
+
+
+
+$$ MAPE = \frac{1}{n} \sum_{i = 1} ^ n \left | \frac{y_i -  \hat{y_i}}{y_i} \right | $$
+
+
+```{r, echo=FALSE}
+print(paste0("Moyenne YT observée =  ", mean(Yt)))
+print(paste0("Moyenne YT estimée =  ", mean(Xt_ajusted)))
+print(paste0("MAE (Equart Absolu Moyen) =  ", mae(Yt,Xt_ajusted)))
+print(paste0("MAPE (Pourcentage d'Equart Absolu Moyen) =  ", mape(Yt,Xt_ajusted)))
+
+```
+
+
+En moyenne, nos estimations sont proches des valeurs observées. l'erreu absolue moyenne est de 1.17, et le pourcentage d'erreur absolue moyenne est de 5.68%. Notre modèle de Log SV est donc fiable.
+
+Une autre manière de calibrer les volatilités consiste à utiliser le modèle Heston. 
+
+
+
+# 2 TP3 : Calibration Modèle d’Heston
+
+Dans cette partie, nous estimons les volatilités observées avec le modèle d'Heston et nous comparons les résultats obtenus.
+
+**Modèle d'Heston : **
+
+```{r, echo=FALSE}
+HestonCallClosedForm <-
+    function(lambda, vbar, eta, rho, v0, r, tau, S0, K) {
+	PIntegrand <- function(u, lambda, vbar, eta, rho, v0, r, tau, S0, K, j) {
+            F <- S0*exp(r*tau)
+            x <- log(F/K)
+            a <- lambda * vbar
+            
+            if (j == 1) {
+                b <- lambda - rho* eta
+                alpha <- - u^2/2 - u/2 * 1i + 1i * u
+                beta <- lambda - rho * eta - rho * eta * 1i * u
+            } else {
+                b <- lambda
+                alpha <- - u^2/2 - u/2 * 1i
+                beta <- lambda - rho * eta * 1i * u
+            }
+            
+            gamma <- eta^2/2
+            d <- sqrt(beta^2 - 4*alpha*gamma)
+            rplus <- (beta + d)/(2*gamma)
+            rminus <- (beta - d)/(2*gamma)
+            g <- rminus / rplus
+            
+            D <- rminus * (1 - exp(-d*tau))/(1-g*exp(-d*tau))
+            C <- lambda * (rminus * tau - 2/(eta^2) * log( (1-g*exp(-d*tau))/(1-g) ) )
+            
+            top <- exp(C*vbar + D*v0 + 1i*u*x)
+            bottom <- (1i * u)
+            Re(top/bottom)
+	}
+	
+	P <- function(lambda, vbar, eta, rho, v0, r, tau, S0, K, j) {
+            value <- integrate(PIntegrand, lower = 0, upper = Inf,
+                               lambda, vbar, eta, rho, v0, r, tau,
+                               S0, K, j, subdivisions=1000)$value
+            0.5 + 1/pi * value
+	}
+
+        A <- S0*P(lambda, vbar, eta, rho, v0, r, tau, S0, K, 1)
+        B <- K*exp(-r*tau)*P(lambda, vbar, eta, rho, v0, r, tau, S0, K, 0)
+        A-B
+    }
+```
+
+
+```{r, echo=TRUE}
+HestonCallClosedForm(lambda = 4, vbar = 0.03, eta = 0.4,
+                     rho = -0.5, v0 = 0.03, r = 0.05, 
+                     tau = 1, S0 = 100, K = 100)
+
+```
+
+
+## 2.2 Calibration du modèle d’Heston
+Dans cette partie, nous créons un programme permmettant de calibrer le modèle d'Heston par bootstrap.
+
+```{r, echo=FALSE}
+
+set.seed(1)
+
+data_PB <- read_csv("D:/ENSAI/3A/COURS/Calibration Processus stochastique/Cours/Données_Enoncé_TP3/dataP_B.csv")
+data_St <- read_csv("D:/ENSAI/3A/COURS/Calibration Processus stochastique/Cours/Données_Enoncé_TP3/dataS.csv")
+
+
+PB <- data_PB$HestonPB
+S <- data_St$Sous_jacent
+
+n <- length(PB)
+###### Initialisation
+#General 
+M = 1000
+tau = 1
+K = 100
+sigma_eps2 = 0.1
+Delta = 1/252
+
+#theta
+lambda = 4
+eta = 0.4
+vbar = 0.03
+rho = -0.5
+
+
+#Shaping 
+V <- matrix(NA, nrow = n, ncol = M)
+w_v <- matrix(NA, nrow = n, ncol = M)
+w_v_normalised <-  matrix(NA, nrow = n, ncol = M)
+
+indice_mat<- matrix(NA, nrow = n, ncol = M)#juste Pour voir les indices retenus
+
+#Densité stationnaire
+alpha1 = (2*lambda*vbar)/(eta^2)
+alpha2 = (eta^2)/(2*lambda)
+
+V[1,] <- rgamma (n = M, shape =alpha1, scale = alpha2)# Comparer 
+w_v[1,] = dgamma(V[1,], shape =alpha1, scale = alpha2)
+
+w_v_normalised[1,] = w_v[1,]/sum(w_v[1,])
+
+
+
+
+Prix_Cal = matrix(NA, nrow = n, ncol = M)#Matrice de prix du call
+
+#calcul du prix du cal à t=1
+for (i in 1:M){
+  
+  Prix_Cal[1,i]<- HestonCallClosedForm(lambda = 4, vbar =  0.03, eta = 0.4,
+                                       rho = -0.5, v0 = V[1,i], r = 0.05, 
+                                       tau = 1, S0 = S[1], K = 100)
+}
+
+
+
+for (t in 2:n){
+  
+  
+  #Predicted step 
+  c = (2*lambda)/(eta^2*(1-exp(-lambda*(Delta))))  #Pb dans c   (2*lambda)/(eta^2)*(1-exp(-lambda*Delta)) 
+  d = ((2*lambda*vbar)/(eta^2)) - 1
+  
+  
+  for (i in 1:M)
+  {
+    w = c*V[t-1,i]*exp(-lambda*Delta)
+    
+    V[t,i]<- (1/(2*c))*rchisq(1, 2*d+2, 2*w)#w = c*vt-1
+    
+    Prix_Cal[t,i] <- HestonCallClosedForm(lambda = 4, vbar =  0.03, eta = 0.4,
+                                          rho = -0.5, v0 = V[t,i], r = 0.05, 
+                                          tau = 1, S0 = S[t], K = 100)
+    
+    
+    w_v[t,i] <-(1/sqrt(2*pi*sigma_eps2))*exp(-(PB[t] -Prix_Cal[t,i])^2/(2*sigma_eps2))
+    
+    
+  }
+  
+  #Normalisation
+  w_v_normalised[t,] <- w_v[t,]/sum(w_v[t,])
+  
+  
+  #Resampling step
+  
+  
+  indice <- sample(1 : M, replace= TRUE, prob=w_v_normalised[t,])
+  V[t,] <- V[t,indice]
+  
+  indice_mat[t,] <- indice
+  
+  # Reset 
+  
+  w_v_normalised[t, ] <- 1/M
+  
+  
+  V[t,] = mean(V[t,])
+  
+}
+
+
+#comparaison 
+data_V <- read_csv("D:/ENSAI/3A/COURS/Calibration Processus stochastique/Cours/Données_Enoncé_TP3/dataV.csv")
+
+V[1,] = mean(V[1,]) 
+
+estimated_V <- V[,1]
+
+
+
+```
+
+## 2.3 Comparaison des courbes
+
+```{r, echo=TRUE}
+
+par(mfrow=c(1,1))
+plot(data_V$Var[1:n], type='l', ylim=c(0.001, 0.2), ylab = "Volatilté")
+points(estimated_V[1:n] , type='l', col='red', ylim=c(0.001, 0.2))
+legend('topright', legend=c('Vtrue', 'Vestimate'),
+       col=c('black','red'), pch=4)
+
+```
+```{r, echo=FALSE}
+print(paste0("MAE (Equart Absolu Moyen) =  ", mae(data_V$Var[1:n],estimated_V[1:n])))
+```
+
+Les volatilités calibrées avec le modèle d'Heston ont la même trajectoire et sont très proches des volatités observées. Avec une erreur abolue moyenne de 0.01334558   On peut déduire que notre modèle d'Heston est bien calibré
+
+# 3.TP4 : Modèles markoviens à changements de régime
+
+Dans cette partie, nous allons modéliser les rendements d’un actif financier quelconque par
+un modèle Markovien à changement de régime
+
+**Modèle Markovien à changement de régime : **
+
+$$y_y = \mu S_t + \sigma S_t \epsilon_t $$
+
+où $S_t$ représente le régime caché modélisé par une chaîne de Markov et $\epsilon_t$ un bruit
+gaussien centré et de variance unitaire.
+
+
+**Implémentation de l'exemple : **
+
+```{r, echo=FALSE}
+
+set.seed(1)
+
+#Création des paramètres de distribution
+Nklower <- 50
+Nkupper <- 150
+bullmean <- 0.1
+bullvar <- 0.1
+bearmean <- -0.05
+bearvar <- 0.2
+
+#Création de la liste des durées (en jours) pour chaque régime
+
+days <- replicate(5, sample(Nklower :Nkupper, 1))
+
+
+# Créarion des différents marchés haussiers et baissiers des rendements 
+marketbull1 <- rnorm( days[1], bullmean, bullvar )
+marketbear2 <- rnorm( days[2], bearmean, bearvar )
+marketbull3 <- rnorm( days[3], bullmean, bullvar )
+marketbear4 <- rnorm( days[4], bearmean, bearvar )
+marketbull5 <- rnorm( days[5], bullmean, bullvar )
+
+#Création de la suite des états des vrais régimes
+trueregimes <-c( rep(1,days[1]), rep(2,days[2]), rep(1,days[3]), rep(2,days[4]), rep(1,days[5]))
+returns <-c( marketbull1, marketbear2, marketbull3, marketbear4, marketbull5)
+```
+
+```{r, echo=TRUE}
+plot(returns, type="l", ylab="Returns")
+
+```
+```{r, echo=FALSE}
+
+#Création et ajustement du modèle de Markov caché
+hmm <- depmix(returns ~ 1, family = gaussian(), nstates = 2,
+                data=data.frame(returns=returns))
+
+hmmfit <- fit(hmm, verbose = FALSE)
+
+#Produire à la fois les régimes réels et les probabilités a posteriori des régimes.
+postprobs <- posterior(hmmfit)
+```
+
+```{r, echo=TRUE}
+layout(1:2)
+plot(postprobs$state, type="s", main="True Regimes", xlab="", ylab="Regime")
+matplot(postprobs[,-1], type="l", main="Regime Posterior Probabilities",
+ylab="Probability")
+legend(x="topright", c("Bull","Bear"), fill=1:2, bty="n")
+```
+
+## 3.2 Application sur données réelles en finance
+
+```{r, echo=FALSE}
+NASDAQ <- read_csv("D:/ENSAI/3A/COURS/Calibration Processus stochastique/Cours/TP4/NASDAQ100_TP4.csv", 
+               col_types = cols(DATE = col_date(format = "%Y-%m-%d"),  NASDAQ100 = col_number()))
+
+#View(NASDAQ)
+
+```
+
+### 3.2.1 Calcul du rendement 
+
+$$r_t = 100 \times log \left (  \frac{Y_t}{Y_{t-1}} \right )$$
+
+```{r, echo=TRUE}
+
+rt <- 100*diff(log(NASDAQ$NASDAQ100))
+
+plot(rt, type = "l", main = "Rendements")
+
+```
+
+
+Le graphique ci-dessus présente les log-rendements du NASDAQ du 02/01/2004 au 12/03/2021. On remarque deux périodes de grandes volatilités. La première entre 2007-2008 est dûe à la [crise des subprimes](https://fr.wikipedia.org/wiki/Crise_des_subprimes), une crise financière qui a touché le secteur des prêts hypothécaires dans le monde entier. Et la seconde qui commence en Février 2020 est dûe à la crise sanitaire liée au COVID-19.
+
+### 2 Ajustement des modèles à Markov cachés
+
+Au vu du graphe, il semble y avoir des périodes de grandes volatilité, et de faible volatilité et d'autres ou la volatilité semble moyenne. Quelle hypothèse est la plus plausible :
+
+1) On a des périodes de grandes et de faibles volatilités ; auquel cas on aurait un modèle à deux état.
+
+
+2) On a des périodes de grandes, de faibles et de volatilité moyennes ; auquel cas on aurait un modèle à trois états.
+
+
+Estimons pour n = 2, un modèle à  deux états.
+
+
+
+```{r, echo=FALSE}
+
+hmm2 <- depmix(rt ~ 1, family = gaussian(), nstates = 2,
+                data=data.frame(returns=rt))
+
+
+hmmfit2 <- fit(hmm2, verbose = FALSE)
+
+#Produire à la fois les régimes réels et les probabilités a posteriori des régimes.
+postprobs2 <- posterior(hmmfit2)
+```
+
+```{r, echo=TRUE}
+
+
+layout(1:2)
+plot(postprobs2$state, type="s", main="True Regimes", xlab="", ylab="Regime")
+matplot(postprobs2[,-1], type="l", main="Regime Posterior Probabilities",
+ylab="Probability")
+legend(x="topright", c("Bull","Bear"), fill=1:2, bty="n")
+```
+L'estimation d'un modèle à deux états, indique que nous avons des périodes de grandes volatilités en 2007-2008 (1000-2000 sur le graphique) correspondant à la crise des subprimes et après de 2020 (4000) correspondant à la crise du COVID.entre 2010 et 2017 (2000-3000) on une période de faible volatilité. Ce qui est en parfait adéquation avec le graphique des log-rendements ci-dessus présenté.
+
+
+```{r, echo=FALSE}
+
+hmm3 <- depmix(rt ~ 1, family = gaussian(), nstates = 3,
+                data=data.frame(returns=rt))
+
+
+hmmfit3 <- fit(hmm3, verbose = FALSE)
+
+#Produire à la fois les régimes réels et les probabilités a posteriori des régimes.
+postprobs3 <- posterior(hmmfit3)
+```
+
+```{r, echo=TRUE}
+layout(1:2)
+plot(postprobs3$state, type="s", main="True Regimes", xlab="", ylab="Regime")
+matplot(postprobs3[,-1], type="l", main="Regime Posterior Probabilities",
+ylab="Probability")
+legend(x="topright", c("Bull","Bear", "medium"), fill=1:3, bty="n")
+
+```
+
+Le graphique des régimes nous montre qu'en calibrant un modèle à trois états on observe majoritairement des périodes de faibles volatilité et de volatilité moyennes entre 2011 et 2019 (observations 2000-3500). Les seules périodes de grandes volatilité sont observées durant la crise des subprimes de 2007-2008 et la crise du covid en 2020.
+
+
+Afin de déterminer le meilleur modèle, nous allons comparer les deux modèles en termes du BIC. 
+
+```{r, echo=FALSE}
+#BIC(hmm1)
+print(paste0("BIC modèle à 2 états : ",BIC(hmm2)) )
+print(paste0("BIC modèle à 3 états : ",BIC(hmm3)) )
+```
+
+Il en ressort que le modèle a deux états a un meilleur BIC que celui à trois états. Dans le cadre de l'utilisation d'un modèle Markovien à changement de régime, on privilègera donc un modèle à deux régimes (fortes et faibles volatilité) pour calibrer la volatilité.
+
+
